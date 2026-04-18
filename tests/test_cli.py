@@ -209,6 +209,13 @@ class OpenAIFormatConvertTests(unittest.TestCase):
         self.assertIn("sub2api.json 输出路径", result.stdout)
         self.assertIn("--proxy-key", result.stdout)
 
+    def test_export_codex_help_uses_subcommand_parser(self):
+        result = run_cli(["export-codex", "-h"])
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("codex 输出目录", result.stdout)
+        self.assertIn("--skip-invalid", result.stdout)
+
     def test_convert_subcommand_writes_detected_target_format(self):
         chatgpt_data = {
             "OPENAI_API_KEY": "",
@@ -746,6 +753,162 @@ class OpenAIFormatConvertTests(unittest.TestCase):
         account = exported["accounts"][0]
         self.assertEqual(account["credentials"]["refresh_token"], "existing-refresh")
         self.assertEqual(account["extra"]["last_refresh"], "2026-04-17T09:00:00+00:00")
+
+    def test_export_codex_subcommand_exports_multiple_accounts(self):
+        alpha_account_id = "export-codex-alpha"
+        alpha_email = "alpha@example.com"
+        alpha_tier = "team"
+        beta_account_id = "export-codex-beta"
+        beta_email = "beta@example.com"
+        beta_tier = "pro"
+        alpha_hash = hashlib.sha256(alpha_account_id.encode("utf-8")).hexdigest()[:8]
+        beta_hash = hashlib.sha256(beta_account_id.encode("utf-8")).hexdigest()[:8]
+
+        sub2api_data = {
+            "accounts": [
+                {
+                    "credentials": {
+                        "access_token": self.make_access_token(alpha_account_id, user_id="user-alpha", plan_type=alpha_tier),
+                        "chatgpt_account_id": alpha_account_id,
+                        "email": alpha_email,
+                        "id_token": self.make_jwt(
+                            {
+                                "sub": alpha_account_id,
+                                "email": alpha_email,
+                                "tier": alpha_tier,
+                            }
+                        ),
+                        "refresh_token": "refresh-alpha",
+                    },
+                    "extra": {
+                        "email": alpha_email,
+                        "last_refresh": "2026-04-17T09:00:00+00:00",
+                    },
+                },
+                {
+                    "credentials": {
+                        "access_token": self.make_access_token(beta_account_id, user_id="user-beta", plan_type=beta_tier),
+                        "chatgpt_account_id": beta_account_id,
+                        "email": beta_email,
+                        "id_token": self.make_jwt(
+                            {
+                                "sub": beta_account_id,
+                                "email": beta_email,
+                                "tier": beta_tier,
+                            }
+                        ),
+                        "refresh_token": "refresh-beta",
+                    },
+                    "extra": {
+                        "email": beta_email,
+                    },
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "sub2api.json"
+            output_dir = Path(temp_dir) / "codex-auths"
+            input_path.write_text(json.dumps(sub2api_data), encoding="utf-8")
+
+            result = run_cli(["export-codex", str(input_path), str(output_dir)])
+
+            alpha_output = output_dir / f"codex-{alpha_hash}-{alpha_email}-{alpha_tier}.json"
+            beta_output = output_dir / f"codex-{beta_hash}-{beta_email}-{beta_tier}.json"
+            alpha_data = json.loads(alpha_output.read_text(encoding="utf-8")) if alpha_output.exists() else None
+            beta_data = json.loads(beta_output.read_text(encoding="utf-8")) if beta_output.exists() else None
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIsNotNone(alpha_data)
+        self.assertIsNotNone(beta_data)
+        self.assertEqual(alpha_data["type"], "codex")
+        self.assertEqual(alpha_data["account_id"], alpha_account_id)
+        self.assertEqual(alpha_data["email"], alpha_email)
+        self.assertEqual(alpha_data["last_refresh"], "2026-04-17T09:00:00+00:00")
+        self.assertEqual(beta_data["type"], "codex")
+        self.assertEqual(beta_data["account_id"], beta_account_id)
+        self.assertEqual(beta_data["refresh_token"], "refresh-beta")
+
+    def test_export_codex_subcommand_requires_id_token(self):
+        account_id = "missing-id-token-account"
+        email = "missing-id-token@example.com"
+        sub2api_data = {
+            "accounts": [
+                {
+                    "credentials": {
+                        "access_token": self.make_access_token(account_id, plan_type="team"),
+                        "chatgpt_account_id": account_id,
+                        "email": email,
+                    },
+                    "extra": {
+                        "email": email,
+                    },
+                }
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "sub2api.json"
+            output_dir = Path(temp_dir) / "codex-auths"
+            input_path.write_text(json.dumps(sub2api_data), encoding="utf-8")
+
+            result = run_cli(["export-codex", str(input_path), str(output_dir)])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("缺少必填字段：id_token", result.stderr)
+
+    def test_export_codex_subcommand_can_skip_invalid_accounts(self):
+        valid_account_id = "skip-invalid-valid-account"
+        valid_email = "valid@example.com"
+        valid_tier = "team"
+        valid_hash = hashlib.sha256(valid_account_id.encode("utf-8")).hexdigest()[:8]
+        invalid_email = "invalid@example.com"
+        sub2api_data = {
+            "accounts": [
+                {
+                    "credentials": {
+                        "access_token": self.make_access_token(valid_account_id, plan_type=valid_tier),
+                        "chatgpt_account_id": valid_account_id,
+                        "email": valid_email,
+                        "id_token": self.make_jwt(
+                            {
+                                "sub": valid_account_id,
+                                "email": valid_email,
+                                "tier": valid_tier,
+                            }
+                        ),
+                    },
+                    "extra": {
+                        "email": valid_email,
+                    },
+                },
+                {
+                    "credentials": {
+                        "access_token": self.make_access_token("invalid-account", plan_type="pro"),
+                        "chatgpt_account_id": "invalid-account",
+                        "email": invalid_email,
+                    },
+                    "extra": {
+                        "email": invalid_email,
+                    },
+                },
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "sub2api.json"
+            output_dir = Path(temp_dir) / "codex-auths"
+            input_path.write_text(json.dumps(sub2api_data), encoding="utf-8")
+
+            result = run_cli(["export-codex", str(input_path), str(output_dir), "--skip-invalid"])
+
+            valid_output = output_dir / f"codex-{valid_hash}-{valid_email}-{valid_tier}.json"
+            valid_data = json.loads(valid_output.read_text(encoding="utf-8")) if valid_output.exists() else None
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIsNotNone(valid_data)
+        self.assertEqual(valid_data["account_id"], valid_account_id)
+        self.assertIn("跳过无效条目", result.stdout)
 
 
 class RepositorySafetyTests(unittest.TestCase):

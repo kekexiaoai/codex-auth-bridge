@@ -22,11 +22,14 @@ TRANSLATIONS = {
         "arg_force_account_filename": "强制输出为 <类型>-<account_id的sha256前8位>-<email>-<tier>.json",
         "arg_input_path": "输入 JSON 文件或文件夹路径",
         "arg_lang": "输出语言：zh、en 或 auto（默认 zh，auto 按环境判断）",
+        "arg_codex_output_dir": "codex 输出目录",
         "arg_output_path_optional": "输出 JSON 文件或文件夹路径",
         "arg_proxy_key": "可选；当需要为账户写入 proxy_key 或初始化 proxies[0].proxy_key 时使用的代理键",
+        "arg_skip_invalid": "遇到无效条目时跳过，而不是立即退出",
         "arg_sub2api_output_path": "sub2api.json 输出路径",
         "cmd_convert_help": "探测后执行双向转换",
         "cmd_detect_help": "只探测输入文件格式，不执行转换",
+        "cmd_export_codex_help": "将 sub2api.json 批量导出为 codex 文件（codex 即 CPA 使用的格式）",
         "cmd_export_sub2api_help": "将 auth.json 文件导出或追加到 sub2api.json",
         "convert_done": "转换完成！已保存到：{output_path}",
         "convert_in_progress": "正在转换：{source_format} -> {target_format}",
@@ -34,6 +37,8 @@ TRANSLATIONS = {
         "error_accounts_must_be_array": "sub2api 配置中的 accounts 必须是数组",
         "error_batch_output_conflict": "批量转换输出路径冲突：{destination}",
         "error_batch_overwrite_input": "批量转换会覆盖其他输入文件：{destination}",
+        "error_codex_output_conflict": "codex 导出输出路径冲突：{destination}",
+        "error_codex_output_must_be_dir": "codex 导出的输出路径必须是文件夹：{output_dir}",
         "error_detect_format_unrecognized": "无法识别的格式，不是 chatgpt 或 codex 结构",
         "error_directory_conversion_requires_dir": "目录转换需要文件夹输入：{input_dir}",
         "error_directory_output_must_be_dir": "目录转换的输出路径必须是文件夹：{output_dir}",
@@ -52,6 +57,9 @@ TRANSLATIONS = {
         "error_token_payload_not_object": "token 载荷必须是对象",
         "error_unable_to_parse_token_payload": "无法解析 id_token 载荷",
         "examples_header": "示例:",
+        "export_codex_done": "\n完成！导出 {exported} 个，跳过 {skipped} 个",
+        "export_codex_skipped_invalid": "  跳过无效条目 #{index}: {error}",
+        "export_codex_written": "  导出: {output_path}",
         "export_added": "  添加: {email}",
         "export_done": "\n完成！新增 {added} 个，更新 {updated} 个，跳过 {skipped} 个，总计 {total} 个账户",
         "export_skipped_older": "  跳过（较旧）: {email}",
@@ -70,11 +78,14 @@ TRANSLATIONS = {
         "arg_force_account_filename": "Force output filename as <type>-<first-8-of-sha256(account_id)>-<email>-<tier>.json",
         "arg_input_path": "Input JSON file or directory path",
         "arg_lang": "Output language: zh, en, or auto (default: zh; auto detects from environment)",
+        "arg_codex_output_dir": "codex output directory",
         "arg_output_path_optional": "Output JSON file or directory path",
         "arg_proxy_key": "Optional; used when writing proxy_key for accounts or initializing proxies[0].proxy_key",
+        "arg_skip_invalid": "Skip invalid entries instead of failing immediately",
         "arg_sub2api_output_path": "sub2api.json output path",
         "cmd_convert_help": "Detect and convert between formats",
         "cmd_detect_help": "Detect the input format without converting",
+        "cmd_export_codex_help": "Export sub2api.json into codex files in batch (codex is the format used by CPA)",
         "cmd_export_sub2api_help": "Export or append auth.json files into sub2api.json",
         "convert_done": "Conversion complete! Saved to: {output_path}",
         "convert_in_progress": "Converting: {source_format} -> {target_format}",
@@ -82,6 +93,8 @@ TRANSLATIONS = {
         "error_accounts_must_be_array": "The accounts field in sub2api config must be an array",
         "error_batch_output_conflict": "Batch conversion output path conflict: {destination}",
         "error_batch_overwrite_input": "Batch conversion would overwrite another input file: {destination}",
+        "error_codex_output_conflict": "codex export output path conflict: {destination}",
+        "error_codex_output_must_be_dir": "The output path for codex export must be a directory: {output_dir}",
         "error_detect_format_unrecognized": "Unrecognized format; expected a chatgpt or codex structure",
         "error_directory_conversion_requires_dir": "Directory conversion requires a directory input: {input_dir}",
         "error_directory_output_must_be_dir": "The output path for directory conversion must be a directory: {output_dir}",
@@ -100,6 +113,9 @@ TRANSLATIONS = {
         "error_token_payload_not_object": "token payload must be an object",
         "error_unable_to_parse_token_payload": "Unable to parse id_token payload",
         "examples_header": "Examples:",
+        "export_codex_done": "\nDone! Exported {exported}, skipped {skipped}",
+        "export_codex_skipped_invalid": "  Skipped invalid entry #{index}: {error}",
+        "export_codex_written": "  Exported: {output_path}",
         "export_added": "  Added: {email}",
         "export_done": "\nDone! Added {added}, updated {updated}, skipped {skipped}, total {total} accounts",
         "export_skipped_older": "  Skipped (older): {email}",
@@ -214,6 +230,13 @@ def copy_optional_string(source, source_path, target, target_key):
     value = get_nested_value(source, source_path)
     if isinstance(value, str) and value != "":
         target[target_key] = value
+
+
+def pick_first_non_empty_string(*values):
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
 
 
 def analyze_format(data):
@@ -437,8 +460,12 @@ def resolve_account_metadata(data, analysis, access_payload=None, id_payload=Non
 
 def build_account_filename(data, analysis):
     metadata = resolve_account_metadata(data, analysis)
+    return build_account_filename_from_metadata(metadata, analysis["target_format"])
+
+
+def build_account_filename_from_metadata(metadata, output_format):
     account_hash = hashlib.sha256(metadata["account_id"].encode("utf-8")).hexdigest()[:8]
-    return f"{analysis['target_format']}-{account_hash}-{metadata['email']}-{metadata['tier']}.json"
+    return f"{output_format}-{account_hash}-{metadata['email']}-{metadata['tier']}.json"
 
 
 def should_use_account_filename(output_path, force_account_filename):
@@ -641,6 +668,24 @@ def load_sub2api_config(output_path, proxy_key=None):
         data["proxies"] = [{"proxy_key": resolved_proxy_key}]
 
     return data, resolved_proxy_key
+
+
+def load_sub2api_accounts(input_path):
+    input_path = Path(input_path)
+    if not input_path.exists():
+        raise FileNotFoundError(t("error_input_path_missing", input_path=input_path))
+
+    data = load_json(input_path)
+    if not isinstance(data, dict):
+        raise ValueError(t("error_sub2api_root_must_be_object"))
+
+    accounts = data.get("accounts")
+    if accounts is None:
+        accounts = []
+    if not isinstance(accounts, list):
+        raise ValueError(t("error_accounts_must_be_array"))
+
+    return data, accounts
 
 
 def collect_existing_sub2api_emails(sub2api_data):
@@ -873,6 +918,76 @@ def build_sub2api_account_entry(data, source_path):
     }
 
 
+def build_codex_account_from_sub2api_entry(account):
+    credentials = account.get("credentials") if isinstance(account, dict) else {}
+    if not isinstance(credentials, dict):
+        credentials = {}
+    extra = account.get("extra") if isinstance(account, dict) else {}
+    if not isinstance(extra, dict):
+        extra = {}
+
+    codex_data = {
+        "access_token": require_string(credentials, "access_token"),
+        "disabled": False,
+        "email": pick_first_non_empty_string(credentials.get("email"), extra.get("email")),
+        "expired": "",
+        "id_token": require_string(credentials, "id_token"),
+        "last_refresh": normalize_string(extra.get("last_refresh", ""), "last_refresh"),
+        "type": "codex",
+    }
+
+    account_id = pick_first_non_empty_string(
+        credentials.get("chatgpt_account_id"),
+        extra.get("chatgpt_account_id"),
+    )
+    if account_id:
+        codex_data["account_id"] = account_id
+
+    refresh_token = pick_first_non_empty_string(credentials.get("refresh_token"))
+    if refresh_token:
+        codex_data["refresh_token"] = refresh_token
+
+    metadata = resolve_account_metadata(codex_data, {"format": "codex"})
+    codex_data["account_id"] = metadata["account_id"]
+    codex_data["email"] = metadata["email"]
+    return codex_data, metadata
+
+
+def export_codex(input_path, output_dir, skip_invalid=False):
+    _, accounts = load_sub2api_accounts(input_path)
+    output_dir = Path(output_dir)
+    if output_dir.exists() and not output_dir.is_dir():
+        raise ValueError(t("error_codex_output_must_be_dir", output_dir=output_dir))
+    ensure_output_directory(output_dir)
+
+    exported = 0
+    skipped = 0
+    written_paths = set()
+
+    for index, account in enumerate(accounts, start=1):
+        try:
+            codex_data, metadata = build_codex_account_from_sub2api_entry(account)
+            output_path = output_dir / build_account_filename_from_metadata(metadata, "codex")
+            output_key = output_path.resolve(strict=False)
+            if output_key in written_paths:
+                raise ValueError(t("error_codex_output_conflict", destination=output_path))
+            save_json(output_path, codex_data)
+            written_paths.add(output_key)
+            exported += 1
+            print(t("export_codex_written", output_path=output_path))
+        except ValueError as error:
+            if not skip_invalid:
+                raise
+            skipped += 1
+            print(t("export_codex_skipped_invalid", index=index, error=error))
+
+    print(t("export_codex_done", exported=exported, skipped=skipped))
+    return {
+        "exported": exported,
+        "skipped": skipped,
+    }
+
+
 def export_sub2api(input_path, output_path, proxy_key=None):
     input_path = Path(input_path)
     if not input_path.exists():
@@ -940,7 +1055,8 @@ def build_parser():
             "  codex-auth-bridge detect auth.json\n"
             "  codex-auth-bridge convert auth.json\n"
             "  codex-auth-bridge convert auths/ output-dir/\n"
-            "  codex-auth-bridge export-sub2api auths/ sub2api.json --proxy-key proxy-demo"
+            "  codex-auth-bridge export-sub2api auths/ sub2api.json --proxy-key proxy-demo\n"
+            "  codex-auth-bridge export-codex sub2api.json codex-auths/"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -976,6 +1092,18 @@ def build_parser():
         help=t("arg_proxy_key"),
     )
 
+    codex_parser = subparsers.add_parser(
+        "export-codex",
+        help=t("cmd_export_codex_help"),
+    )
+    codex_parser.add_argument("input_path", help=t("arg_sub2api_output_path"))
+    codex_parser.add_argument("output_path", help=t("arg_codex_output_dir"))
+    codex_parser.add_argument(
+        "--skip-invalid",
+        action="store_true",
+        help=t("arg_skip_invalid"),
+    )
+
     return parser
 
 
@@ -1008,7 +1136,7 @@ def parse_args(argv):
     lang, remaining_argv = extract_lang_and_remaining_args(argv)
     set_language(lang)
 
-    known_commands = {"detect", "convert", "export-sub2api", "-h", "--help"}
+    known_commands = {"detect", "convert", "export-sub2api", "export-codex", "-h", "--help"}
     if remaining_argv and remaining_argv[0] not in known_commands:
         if len(remaining_argv) == 1:
             return argparse.Namespace(
@@ -1043,6 +1171,12 @@ def main(argv=None):
             detect_path(args.input_path)
         elif args.command == "export-sub2api":
             export_sub2api(args.input_path, args.output_path, proxy_key=getattr(args, "proxy_key", None))
+        elif args.command == "export-codex":
+            export_codex(
+                args.input_path,
+                args.output_path,
+                skip_invalid=getattr(args, "skip_invalid", False),
+            )
         else:
             convert_path(
                 args.input_path,

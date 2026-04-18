@@ -9,11 +9,12 @@ English documentation: [README.md](README.md)
 - 在 `chatgpt` 与 `codex` 两种 `auth.json` 结构之间互转
 - 根据账号信息生成稳定文件名
 - 将单个或批量 auth 文件导出到 `sub2api.json`
+- 将 `sub2api.json` 中的账号批量导回为 CPA 使用的 `codex` 文件
 
 ## 支持的格式
 
 - `chatgpt`：Codex CLI 和 Codex App 使用的 auth 文件格式
-- `codex`：本项目支持处理的另一种 auth 结构
+- `codex`：CPA 使用的 auth 文件格式，也是本项目支持处理的格式
 
 ## 功能说明
 
@@ -27,6 +28,8 @@ English documentation: [README.md](README.md)
   - 保留同邮箱下的不同账号
   - 优先根据 `last_refresh`、再回退到 token 时间决定保留哪份记录
   - 兼容 `proxies: []`
+- 支持将 `sub2api.json` 批量导出回 `codex` 文件
+- `codex` 就是 CPA 使用的格式
 
 ## 安装
 
@@ -83,6 +86,13 @@ codex-auth-bridge export-sub2api auths/ sub2api.json
 codex-auth-bridge export-sub2api auths/ sub2api.json --proxy-key proxy-demo
 ```
 
+### 4. 导出 sub2api 到 codex（CPA）
+
+```bash
+codex-auth-bridge export-codex sub2api.json codex-auths/
+codex-auth-bridge export-codex sub2api.json codex-auths/ --skip-invalid
+```
+
 ## 输出约定
 
 ### auth 转换
@@ -102,6 +112,13 @@ codex-demo.json -> chatgpt-<hash>-demo@example.com-team.json
   1. `last_refresh`
   2. `access_token.iat`
   3. `expires_at`
+
+### codex 导出
+
+- `export-codex` 会从 `sub2api.json` 中读取账号，并为每个账号生成一个 `codex` 文件
+- 输出文件名沿用同一套账号规则：
+  `codex-<account_id 的 sha256 前 8 位>-<email>-<tier>.json`
+- 使用 `--skip-invalid` 时，遇到无效条目会跳过并继续导出其他账号
 
 ## 测试
 
